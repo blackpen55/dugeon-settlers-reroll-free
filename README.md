@@ -6,7 +6,7 @@ Make prayer rerolls free and automatically continue retrying until a rare or leg
 
 ## Download
 
-**[Download the latest release](https://github.com/blackpen55/dugeon-settlers-reroll-free/releases/latest)**
+**[Download the latest release](https://github.com/blackpen55/dungeon-settlers-reroll-helper/releases/latest)**
 
 The release ZIP contains only this mod and its instructions. It does **not** contain or replace `GameAssembly.dll`.
 
