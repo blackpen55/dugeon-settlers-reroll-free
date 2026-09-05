@@ -1,4 +1,4 @@
-# Dungeon Settlers - Reroll Free
+# Dungeon Settlers - Reroll Helper
 
 Make prayer rerolls free and automatically continue retrying until a rare or legendary inscription appears.
 
@@ -18,6 +18,14 @@ The release ZIP contains only this mod and its instructions. It does **not** con
 | Retry prayer roll | **0 mana stones** |
 
 When a retry result has no rare or legendary inscription, the mod immediately performs another retry. It stops as soon as one appears, or after 50 extra rolls as a safety limit. The first prayer is never auto-rerolled, and the game's inscription/stat lock flags are preserved.
+
+Press `T` to cycle the target filter during play:
+
+- `Rare + legendary` (blue + yellow) - default
+- `Rare only` (blue)
+- `Legendary only` (yellow)
+
+The filter resets to `Rare + legendary` when the game starts. Each press is recorded in `BepInEx/LogOutput.log`.
 
 The target list follows the [inscriptions wiki](https://dungeonsettlers.wiki/ko/inscriptions): `Rare` (`희귀`) and `Legendary` (`전설`) entries. The mod checks the game's inscription keys; it does not change rarity weights or create an inscription.
 
@@ -40,6 +48,8 @@ The tested loader is `BepInEx 6.0.0-be.788 Unity.IL2CPP-win-x64`. Builds are ava
 
    `Auto-reroll active for rare/legendary inscriptions`
 
+   `Rarity filter toggle is bound to T`
+
 ## Disable / uninstall
 
 Close the game, then rename or remove:
@@ -56,7 +66,7 @@ Back up saves before loading an older save in a newer game build. A save-version
 
 ## Source
 
-The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds one of the documented rare/legendary keys.
+The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds a key matching the current `T`-selected rarity mode.
 
 ## Disclaimer
 

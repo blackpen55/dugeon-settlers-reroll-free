@@ -5,12 +5,14 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
+using BepInEx.Unity.IL2CPP.Configuration;
 using HarmonyLib;
 using Refactor.Main;
+using UnityEngine;
 
 namespace DungeonSettlers.RerollFree;
 
-[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Free", "1.1.0")]
+[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Helper", "1.2.0")]
 [BepInProcess("DungeonSettlers.exe")]
 public sealed class Plugin : BasePlugin
 {
@@ -25,6 +27,15 @@ public sealed class Plugin : BasePlugin
     private const int MaxAutoRerolls = 50;
     private static bool _autoRerolling;
     private static Plugin _instance;
+    private static RarityMode _rarityMode = RarityMode.Both;
+    private readonly KeyboardShortcut _toggleRarityMode = new KeyboardShortcut(KeyCode.T);
+
+    private enum RarityMode
+    {
+        Both,
+        RareOnly,
+        LegendaryOnly
+    }
 
     // Rare and legendary inscription keys from the current wiki table.
     private static readonly HashSet<string> TargetInscriptions = new HashSet<string>(StringComparer.Ordinal)
@@ -78,6 +89,13 @@ public sealed class Plugin : BasePlugin
         "AFFECTER_StormInscription"
     };
 
+    private static readonly HashSet<string> LegendaryInscriptions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "AFFECTER_CapitalInscription",
+        "AFFECTER_PerfectionInscription",
+        "AFFECTER_StormInscription"
+    };
+
     private static readonly byte[] ExpectedBytes =
     {
         0x85, 0xFF,                         // test edi, edi
@@ -95,6 +113,16 @@ public sealed class Plugin : BasePlugin
 
         try
         {
+            AddComponent<HotkeyListener>();
+            Log.LogInfo("Rarity filter toggle is bound to T: Both -> Rare only -> Legendary only.");
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Rarity filter hotkey was not initialized: {ex}");
+        }
+
+        try
+        {
             ApplyRuntimePatch();
         }
         catch (Exception ex)
@@ -109,6 +137,28 @@ public sealed class Plugin : BasePlugin
         catch (Exception ex)
         {
             Log.LogError($"Auto-reroll patch was not applied: {ex}");
+        }
+    }
+
+    private void HandleHotkey()
+    {
+        if (!_toggleRarityMode.IsDown())
+            return;
+
+        _rarityMode = (RarityMode)(((int)_rarityMode + 1) % 3);
+        Log.LogInfo($"Reroll target changed to {GetRarityModeLabel(_rarityMode)}.");
+    }
+
+    private static string GetRarityModeLabel(RarityMode mode)
+    {
+        switch (mode)
+        {
+            case RarityMode.RareOnly:
+                return "Rare only (blue)";
+            case RarityMode.LegendaryOnly:
+                return "Legendary only (yellow)";
+            default:
+                return "Rare + legendary (blue + yellow)";
         }
     }
 
@@ -185,11 +235,38 @@ public sealed class Plugin : BasePlugin
         for (int i = 0; i < inscriptions.Count; i++)
         {
             string key = inscriptions[i];
-            if (key != null && TargetInscriptions.Contains(key))
+            if (IsTargetInscription(key))
                 return true;
         }
 
         return false;
+    }
+
+    private static bool IsTargetInscription(string key)
+    {
+        if (key == null)
+            return false;
+
+        switch (_rarityMode)
+        {
+            case RarityMode.RareOnly:
+                return TargetInscriptions.Contains(key) && !LegendaryInscriptions.Contains(key);
+            case RarityMode.LegendaryOnly:
+                return LegendaryInscriptions.Contains(key);
+            default:
+                return TargetInscriptions.Contains(key);
+        }
+    }
+
+    private sealed class HotkeyListener : MonoBehaviour
+    {
+        public HotkeyListener(IntPtr ptr) : base(ptr) { }
+
+        public void Update()
+        {
+            if (_instance != null)
+                _instance.HandleHotkey();
+        }
     }
 
     private void ApplyRuntimePatch()

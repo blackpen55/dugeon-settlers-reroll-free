@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.12-1.2.0
+
+- Adds an in-game `T` hotkey to cycle between both rarities, rare only, and legendary only.
+- Logs the active rarity filter in `BepInEx/LogOutput.log`.
+- Keeps the default behavior set to rare + legendary.
+
 ## 0.4.12-1.1.0
 
 - Adds automatic retry until a rare or legendary inscription appears.
