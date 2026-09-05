@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace DungeonSettlers.RerollFree;
 
-[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Helper", "1.2.0")]
+[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Helper", "1.3.0")]
 [BepInProcess("DungeonSettlers.exe")]
 public sealed class Plugin : BasePlugin
 {
@@ -28,6 +28,8 @@ public sealed class Plugin : BasePlugin
     private static bool _autoRerolling;
     private static Plugin _instance;
     private static RarityMode _rarityMode = RarityMode.Both;
+    private static string _overlayText;
+    private static float _overlayUntil;
     private readonly KeyboardShortcut _toggleRarityMode = new KeyboardShortcut(KeyCode.T);
 
     private enum RarityMode
@@ -146,7 +148,22 @@ public sealed class Plugin : BasePlugin
             return;
 
         _rarityMode = (RarityMode)(((int)_rarityMode + 1) % 3);
+        _overlayText = GetRarityModeOverlayLabel(_rarityMode);
+        _overlayUntil = Time.unscaledTime + 2f;
         Log.LogInfo($"Reroll target changed to {GetRarityModeLabel(_rarityMode)}.");
+    }
+
+    private static string GetRarityModeOverlayLabel(RarityMode mode)
+    {
+        switch (mode)
+        {
+            case RarityMode.RareOnly:
+                return "희귀만";
+            case RarityMode.LegendaryOnly:
+                return "전설만";
+            default:
+                return "희귀, 전설";
+        }
     }
 
     private static string GetRarityModeLabel(RarityMode mode)
@@ -260,12 +277,36 @@ public sealed class Plugin : BasePlugin
 
     private sealed class HotkeyListener : MonoBehaviour
     {
+        private GUIStyle _overlayStyle;
+
         public HotkeyListener(IntPtr ptr) : base(ptr) { }
 
         public void Update()
         {
             if (_instance != null)
                 _instance.HandleHotkey();
+        }
+
+        public void OnGUI()
+        {
+            if (_instance == null || string.IsNullOrEmpty(_overlayText) || Time.unscaledTime > _overlayUntil)
+                return;
+
+            if (_overlayStyle == null)
+            {
+                _overlayStyle = new GUIStyle(GUI.skin.box)
+                {
+                    fontSize = 22
+                };
+            }
+
+            Rect rect = new Rect(20f, 20f, 280f, 54f);
+            Color previousColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, 0.8f);
+            GUI.Box(rect, GUIContent.none);
+            GUI.color = Color.white;
+            GUI.Label(rect, _overlayText, _overlayStyle);
+            GUI.color = previousColor;
         }
     }
 

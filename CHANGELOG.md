@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.12-1.3.0
+
+- Shows the selected rarity mode on screen for two seconds after pressing `T`.
+- Displays `희귀만`, `전설만`, or `희귀, 전설` to make the active filter visible.
+
 ## 0.4.12-1.2.0
 
 - Adds an in-game `T` hotkey to cycle between both rarities, rare only, and legendary only.

@@ -26,6 +26,7 @@ Press `T` to cycle the target filter during play:
 - `Legendary only` (yellow)
 
 The filter resets to `Rare + legendary` when the game starts. Each press is recorded in `BepInEx/LogOutput.log`.
+After pressing `T`, the selected mode also appears on screen for two seconds as `희귀만`, `전설만`, or `희귀, 전설`.
 
 The target list follows the [inscriptions wiki](https://dungeonsettlers.wiki/ko/inscriptions): `Rare` (`희귀`) and `Legendary` (`전설`) entries. The mod checks the game's inscription keys; it does not change rarity weights or create an inscription.
 
