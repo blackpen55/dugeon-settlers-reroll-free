@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
+using HarmonyLib;
+using Refactor.Main;
 
 namespace DungeonSettlers.RerollFree;
 
-[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Free", "1.0.0")]
+[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Free", "1.1.0")]
 [BepInProcess("DungeonSettlers.exe")]
 public sealed class Plugin : BasePlugin
 {
@@ -16,6 +19,64 @@ public sealed class Plugin : BasePlugin
     private const int BranchRva = 0xA56B9F;
     private const int DirectRollRva = 0xA57006;
     private const int BranchLength = 15;
+
+    // Deliberate safety ceiling: rare + legendary is uncommon, but a bad roll
+    // must never leave the game stuck in an unbounded native call loop.
+    private const int MaxAutoRerolls = 50;
+    private static bool _autoRerolling;
+    private static Plugin _instance;
+
+    // Rare and legendary inscription keys from the current wiki table.
+    private static readonly HashSet<string> TargetInscriptions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "AFFECTER_GiantInscription",
+        "AFFECTER_SmashInscription",
+        "AFFECTER_JesterInscription",
+        "AFFECTER_GoldmineInscription",
+        "AFFECTER_BlitzInscription",
+        "AFFECTER_ChallengeInscription",
+        "AFFECTER_MagicSmiteInscription",
+        "AFFECTER_StakeInscription",
+        "AFFECTER_CrumbleInscription",
+        "AFFECTER_ReflectionInscription",
+        "AFFECTER_DeathThroesInscription",
+        "AFFECTER_ProtectionInscription",
+        "AFFECTER_FlintInscription",
+        "AFFECTER_HighGradeGuardDamageReductionInscription",
+        "AFFECTER_HighGradeGuardChanceInscription",
+        "AFFECTER_HighGradeAttackSpeedInscription",
+        "AFFECTER_HighGradeMaxEnergyInscription",
+        "AFFECTER_HighGradeMagicAttackPowerInscription",
+        "AFFECTER_HighGradeMagicResistanceInscription",
+        "AFFECTER_HighGradeHitChanceInscription",
+        "AFFECTER_HighGradePhysicalAttackPowerInscription",
+        "AFFECTER_HighGradePhysicalResistanceInscription",
+        "AFFECTER_HighGradeMaxHealthTotalInscription",
+        "AFFECTER_HighGradeHealthPercentageRegenerationInscription",
+        "AFFECTER_HighGradeLifeStealInscription",
+        "AFFECTER_HighGradeCooldownReductionInscription",
+        "AFFECTER_HighGradeMaxWeightInscription",
+        "AFFECTER_HighGradeCriticalDamageBonusInscription",
+        "AFFECTER_HighGradeCriticalChanceInscription",
+        "AFFECTER_HighGradeDodgeChanceInscription",
+        "AFFECTER_GuardianInscription",
+        "AFFECTER_DivineInscription",
+        "AFFECTER_FortressInscription",
+        "AFFECTER_GloomInscription",
+        "AFFECTER_BurstInscription",
+        "AFFECTER_HarmonyInscription",
+        "AFFECTER_ExecutionInscription",
+        "AFFECTER_ShockWaveInscription",
+        "AFFECTER_SinkInscription",
+        "AFFECTER_ElasticityInscription",
+        "AFFECTER_WarriorInscription",
+        "AFFECTER_TideInscription",
+        "AFFECTER_BloodshotInscription",
+        "AFFECTER_RecoveryInscription",
+        "AFFECTER_CapitalInscription",
+        "AFFECTER_PerfectionInscription",
+        "AFFECTER_StormInscription"
+    };
 
     private static readonly byte[] ExpectedBytes =
     {
@@ -30,6 +91,8 @@ public sealed class Plugin : BasePlugin
 
     public override void Load()
     {
+        _instance = this;
+
         try
         {
             ApplyRuntimePatch();
@@ -38,6 +101,95 @@ public sealed class Plugin : BasePlugin
         {
             Log.LogError($"Reroll-free patch was not applied: {ex}");
         }
+
+        try
+        {
+            ApplyAutoRerollPatch();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Auto-reroll patch was not applied: {ex}");
+        }
+    }
+
+    private static void ApplyAutoRerollPatch()
+    {
+        MethodBase target = AccessTools.Method(
+            typeof(LevelUpHelper),
+            nameof(LevelUpHelper.PrayLevelUp),
+            new[] { typeof(OfferingType), typeof(bool), typeof(bool) });
+
+        if (target == null)
+            throw new MissingMethodException("LevelUpHelper.PrayLevelUp(OfferingType, bool, bool)");
+
+        var harmony = new Harmony("com.codex.dungeonsettlers.rerollfree.auto");
+        harmony.Patch(
+            target,
+            prefix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(BeforePrayer))),
+            postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(AfterPrayer))));
+
+        _instance.Log.LogInfo(
+            $"Auto-reroll active for rare/legendary inscriptions; max extra rolls={MaxAutoRerolls}.");
+    }
+
+    private static void BeforePrayer(LevelUpHelper __instance, ref bool __state)
+    {
+        // The game uses this flag to distinguish the first prayer from retry.
+        __state = __instance != null && __instance.HasLevelUpResult;
+    }
+
+    private static void AfterPrayer(
+        LevelUpHelper __instance,
+        OfferingType offeringType,
+        bool lockInscriptions,
+        bool lockStats,
+        bool __state)
+    {
+        if (!__state || __instance == null || _autoRerolling)
+            return;
+
+        _autoRerolling = true;
+        int extraRolls = 0;
+        try
+        {
+            if (HasTargetInscription(__instance))
+                return;
+
+            while (extraRolls < MaxAutoRerolls && !HasTargetInscription(__instance))
+            {
+                __instance.PrayLevelUp(offeringType, lockInscriptions, lockStats);
+                extraRolls++;
+            }
+
+            _instance.Log.LogInfo(
+                extraRolls == MaxAutoRerolls
+                    ? $"Auto-reroll stopped at safety limit ({MaxAutoRerolls}); no target rarity found."
+                    : $"Auto-rerolled {extraRolls} extra time(s) until a rare/legendary inscription appeared.");
+        }
+        catch (Exception ex)
+        {
+            _instance.Log.LogError($"Auto-reroll stopped after {extraRolls} extra roll(s): {ex}");
+        }
+        finally
+        {
+            _autoRerolling = false;
+        }
+    }
+
+    private static bool HasTargetInscription(LevelUpHelper helper)
+    {
+        var inscriptions = helper.LevelUpInscriptions;
+        if (inscriptions == null)
+            return false;
+
+        for (int i = 0; i < inscriptions.Count; i++)
+        {
+            string key = inscriptions[i];
+            if (key != null && TargetInscriptions.Contains(key))
+                return true;
+        }
+
+        return false;
     }
 
     private void ApplyRuntimePatch()
