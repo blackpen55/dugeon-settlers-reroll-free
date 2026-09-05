@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.12-1.4.0
+
+- Raises the safety limit to 300 extra rolls only for `Legendary only` mode.
+- Keeps the 50-roll limit for `Rare only` and `Rare + legendary` modes.
+- Stops immediately when a matching inscription appears.
+
 ## 0.4.12-1.3.0
 
 - Shows the selected rarity mode on screen for two seconds after pressing `T`.

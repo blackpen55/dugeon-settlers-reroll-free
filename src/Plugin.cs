@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace DungeonSettlers.RerollFree;
 
-[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Helper", "1.3.0")]
+[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Helper", "1.4.0")]
 [BepInProcess("DungeonSettlers.exe")]
 public sealed class Plugin : BasePlugin
 {
@@ -22,9 +22,10 @@ public sealed class Plugin : BasePlugin
     private const int DirectRollRva = 0xA57006;
     private const int BranchLength = 15;
 
-    // Deliberate safety ceiling: rare + legendary is uncommon, but a bad roll
-    // must never leave the game stuck in an unbounded native call loop.
+    // Deliberate safety ceilings: legendary is much rarer, so it gets a larger
+    // cap only in LegendaryOnly mode. Neither path can loop indefinitely.
     private const int MaxAutoRerolls = 50;
+    private const int MaxLegendaryAutoRerolls = 300;
     private static bool _autoRerolling;
     private static Plugin _instance;
     private static RarityMode _rarityMode = RarityMode.Both;
@@ -196,7 +197,8 @@ public sealed class Plugin : BasePlugin
             postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(AfterPrayer))));
 
         _instance.Log.LogInfo(
-            $"Auto-reroll active for rare/legendary inscriptions; max extra rolls={MaxAutoRerolls}.");
+            $"Auto-reroll active for rare/legendary inscriptions; max extra rolls={MaxAutoRerolls}, " +
+            $"legendary-only={MaxLegendaryAutoRerolls}.");
     }
 
     private static void BeforePrayer(LevelUpHelper __instance, ref bool __state)
@@ -217,21 +219,25 @@ public sealed class Plugin : BasePlugin
 
         _autoRerolling = true;
         int extraRolls = 0;
+        int maxAutoRerolls = _rarityMode == RarityMode.LegendaryOnly
+            ? MaxLegendaryAutoRerolls
+            : MaxAutoRerolls;
         try
         {
             if (HasTargetInscription(__instance))
                 return;
 
-            while (extraRolls < MaxAutoRerolls && !HasTargetInscription(__instance))
+            while (extraRolls < maxAutoRerolls && !HasTargetInscription(__instance))
             {
                 __instance.PrayLevelUp(offeringType, lockInscriptions, lockStats);
                 extraRolls++;
             }
 
             _instance.Log.LogInfo(
-                extraRolls == MaxAutoRerolls
-                    ? $"Auto-reroll stopped at safety limit ({MaxAutoRerolls}); no target rarity found."
-                    : $"Auto-rerolled {extraRolls} extra time(s) until a rare/legendary inscription appeared.");
+                extraRolls == maxAutoRerolls
+                    ? $"Auto-reroll stopped at safety limit ({maxAutoRerolls}); no target rarity found."
+                    : $"Auto-rerolled {extraRolls} extra time(s) until a " +
+                      $"{GetRarityModeLabel(_rarityMode)} inscription appeared.");
         }
         catch (Exception ex)
         {

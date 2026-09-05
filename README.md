@@ -17,7 +17,7 @@ The release ZIP contains only this mod and its instructions. It does **not** con
 | First prayer | Unchanged / normal |
 | Retry prayer roll | **0 mana stones** |
 
-When a retry result has no rare or legendary inscription, the mod immediately performs another retry. It stops as soon as one appears, or after 50 extra rolls as a safety limit. The first prayer is never auto-rerolled, and the game's inscription/stat lock flags are preserved.
+When a retry result has no matching inscription, the mod immediately performs another retry. It stops as soon as one appears, or at a safety limit of 50 extra rolls (300 in `Legendary only` mode). The first prayer is never auto-rerolled, and the game's inscription/stat lock flags are preserved.
 
 Press `T` to cycle the target filter during play:
 
