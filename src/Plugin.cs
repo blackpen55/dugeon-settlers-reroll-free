@@ -380,17 +380,38 @@ public sealed class Plugin : BasePlugin
             if (candidate.Slot == null || !candidate.Slot.gameObject.activeInHierarchy)
                 continue;
 
-            RectTransform rect = candidate.Slot.transform as RectTransform;
-            if (rect != null &&
-                IsMouseOver(rect))
+            RefreshHitRects(candidate);
+            for (int j = candidate.HitRects.Count - 1; j >= 0; j--)
             {
-                result = candidate;
-                return true;
+                if (IsMouseOver(candidate.HitRects[j]))
+                {
+                    result = candidate;
+                    return true;
+                }
             }
         }
 
         result = null;
         return false;
+    }
+
+    private static void RefreshHitRects(TraitSlotInfo slotInfo)
+    {
+        slotInfo.HitRects.Clear();
+        AddHitRects(slotInfo.Slot.transform, slotInfo.HitRects);
+    }
+
+    private static void AddHitRects(Transform transform, List<RectTransform> hitRects)
+    {
+        if (transform == null)
+            return;
+
+        RectTransform rect = transform as RectTransform;
+        if (rect != null)
+            hitRects.Add(rect);
+
+        for (int i = 0; i < transform.childCount; i++)
+            AddHitRects(transform.GetChild(i), hitRects);
     }
 
     private static bool IsMouseOver(RectTransform rect)
@@ -541,6 +562,7 @@ public sealed class Plugin : BasePlugin
     private sealed class TraitSlotInfo
     {
         public readonly TraitSlotUI Slot;
+        public readonly List<RectTransform> HitRects = new List<RectTransform>();
         public string Key;
         public EntityStatusPanelUI Panel;
 
@@ -682,8 +704,7 @@ public sealed class Plugin : BasePlugin
             }
 
             float width = Mathf.Min(460f, Screen.width - 40f);
-            float y = Mathf.Clamp(Screen.height * 0.30f, 180f, 360f);
-            Rect rect = new Rect(20f, y, width, 62f);
+            Rect rect = new Rect(20f, 80f, width, 62f);
             Color previousColor = GUI.color;
             GUI.color = new Color(0f, 0f, 0f, 0.8f);
             GUI.Box(rect, GUIContent.none);
