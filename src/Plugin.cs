@@ -353,7 +353,7 @@ public sealed class Plugin : BasePlugin
             return;
         }
 
-        string replacementKey = PickReplacement(slotInfo.Key);
+        string replacementKey = PickReplacement(slotInfo.Key, affecter);
         if (replacementKey == null)
         {
             ShowOverlay("No replacement is available for this rarity mode");
@@ -500,12 +500,13 @@ public sealed class Plugin : BasePlugin
         }
     }
 
-    private static string PickReplacement(string oldKey)
+    private static string PickReplacement(string oldKey, AffecterReader affecter)
     {
         var candidates = new List<string>();
         foreach (string key in TargetInscriptions)
         {
-            if (key != oldKey && IsTargetInscription(key))
+            if (key != oldKey && IsTargetInscription(key) &&
+                (affecter == null || !affecter.Has(key)))
                 candidates.Add(key);
         }
 
@@ -519,17 +520,25 @@ public sealed class Plugin : BasePlugin
         int oldStack,
         float oldDuration)
     {
-        bool removed = false;
+        bool replacementAdded = false;
         IEntity entity = AsEntity(unit);
         try
         {
             if (entity == null)
                 throw new InvalidOperationException("UnitEntity could not be cast to IEntity.");
 
-            ApplyAffecter(entity, oldKey, -oldStack, 0f);
-            removed = true;
-
+            // Add first. If the game rejects the replacement, the original
+            // inscription is still intact instead of being deleted first.
             ApplyAffecter(entity, replacementKey, oldStack, oldDuration);
+            replacementAdded = HasAffecter(entity, replacementKey);
+            if (!replacementAdded)
+                throw new InvalidOperationException(
+                    $"The game did not attach replacement inscription {replacementKey}.");
+
+            ApplyAffecter(entity, oldKey, -oldStack, 0f);
+            if (HasAffecter(entity, oldKey) || !HasAffecter(entity, replacementKey))
+                throw new InvalidOperationException("The inscription swap was not applied atomically.");
+
             return true;
         }
         catch (Exception ex)
@@ -537,21 +546,39 @@ public sealed class Plugin : BasePlugin
             _instance.Log.LogError(
                 $"Inscription replacement failed ({oldKey} -> {replacementKey}): {ex}");
 
-            if (removed)
+            if (replacementAdded)
             {
                 try
                 {
-                    ApplyAffecter(entity, oldKey, oldStack, oldDuration);
+                    if (HasAffecter(entity, replacementKey))
+                        ApplyAffecter(entity, replacementKey, -oldStack, 0f);
                 }
                 catch (Exception restoreEx)
                 {
-                    _instance.Log.LogError($"Could not restore original inscription {oldKey}: {restoreEx}");
+                    _instance.Log.LogError(
+                        $"Could not remove failed replacement {replacementKey}: {restoreEx}");
                 }
+            }
+
+            try
+            {
+                if (!HasAffecter(entity, oldKey))
+                    ApplyAffecter(entity, oldKey, oldStack, oldDuration);
+            }
+            catch (Exception restoreEx)
+            {
+                _instance.Log.LogError($"Could not restore original inscription {oldKey}: {restoreEx}");
             }
 
             ShowOverlay("Replacement failed; restoring the original inscription");
             return false;
         }
+    }
+
+    private static bool HasAffecter(IEntity entity, string key)
+    {
+        AffecterReader affecter = EntityComponent.GetReader<AffecterReader>(entity);
+        return affecter != null && affecter.Has(key);
     }
 
     private static void ApplyAffecter(IEntity entity, string key, int stack, float duration)
