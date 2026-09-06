@@ -12,6 +12,7 @@ using Refactor.Main;
 using Refactor.Tick;
 using Refactor.UI;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace DungeonSettlers.RerollFree;
 
@@ -374,6 +375,34 @@ public sealed class Plugin : BasePlugin
 
     private static bool TryGetHoveredTrait(out TraitSlotInfo result)
     {
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem != null)
+        {
+            var pointerData = new PointerEventData(eventSystem)
+            {
+                position = Input.mousePosition
+            };
+            var raycastResults = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+            eventSystem.RaycastAll(pointerData, raycastResults);
+
+            for (int i = 0; i < raycastResults.Count; i++)
+            {
+                TraitSlotUI hoveredSlot = raycastResults[i].gameObject
+                    .GetComponentInParent<TraitSlotUI>();
+                if (hoveredSlot == null)
+                    continue;
+
+                for (int j = TraitSlots.Count - 1; j >= 0; j--)
+                {
+                    if (TraitSlots[j].Slot != hoveredSlot)
+                        continue;
+
+                    result = TraitSlots[j];
+                    return true;
+                }
+            }
+        }
+
         for (int i = TraitSlots.Count - 1; i >= 0; i--)
         {
             TraitSlotInfo candidate = TraitSlots[i];
