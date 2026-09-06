@@ -645,6 +645,7 @@ public sealed class Plugin : BasePlugin
         int maxAutoRerolls = _rarityMode == RarityMode.LegendaryOnly
             ? MaxLegendaryAutoRerolls
             : MaxAutoRerolls;
+        var fallbackResult = new PrayerResultSnapshot(__instance);
         try
         {
             if (HasTargetInscription(__instance))
@@ -654,16 +655,26 @@ public sealed class Plugin : BasePlugin
             {
                 __instance.PrayLevelUp(offeringType, lockInscriptions, lockStats);
                 extraRolls++;
+                fallbackResult.CaptureIfUsable(__instance);
             }
 
-            _instance.Log.LogInfo(
-                extraRolls == maxAutoRerolls
-                    ? $"Auto-reroll stopped at safety limit ({maxAutoRerolls}); no target rarity found."
-                    : $"Auto-rerolled {extraRolls} extra time(s) until a " +
-                      $"{GetRarityModeLabel(_rarityMode)} inscription appeared.");
+            if (HasTargetInscription(__instance))
+            {
+                _instance.Log.LogInfo(
+                    $"Auto-rerolled {extraRolls} extra time(s) until a " +
+                    $"{GetRarityModeLabel(_rarityMode)} inscription appeared.");
+            }
+            else
+            {
+                fallbackResult.Restore(__instance);
+                _instance.Log.LogInfo(
+                    $"Auto-reroll stopped at safety limit ({maxAutoRerolls}); no target rarity found. " +
+                    "The last valid prayer result was restored.");
+            }
         }
         catch (Exception ex)
         {
+            fallbackResult.Restore(__instance);
             _instance.Log.LogError($"Auto-reroll stopped after {extraRolls} extra roll(s): {ex}");
         }
         finally
@@ -686,6 +697,78 @@ public sealed class Plugin : BasePlugin
         }
 
         return false;
+    }
+
+    private sealed class PrayerResultSnapshot
+    {
+        private readonly List<string> _inscriptions = new List<string>();
+        private readonly Dictionary<StatType, int> _statsChanges =
+            new Dictionary<StatType, int>();
+        private bool _hasResult;
+
+        public PrayerResultSnapshot(LevelUpHelper helper)
+        {
+            Capture(helper);
+        }
+
+        public void CaptureIfUsable(LevelUpHelper helper)
+        {
+            if (helper == null || !helper.HasLevelUpResult)
+                return;
+
+            var inscriptions = helper.LevelUpInscriptions;
+            var statsChanges = helper.LevelUpStatsChanges;
+            if ((inscriptions == null || inscriptions.Count == 0) &&
+                (statsChanges == null || statsChanges.Count == 0))
+                return;
+
+            Capture(helper);
+        }
+
+        public void Restore(LevelUpHelper helper)
+        {
+            if (helper == null)
+                return;
+
+            var inscriptions = helper.LevelUpInscriptions;
+            if (inscriptions != null)
+            {
+                inscriptions.Clear();
+                for (int i = 0; i < _inscriptions.Count; i++)
+                    inscriptions.Add(_inscriptions[i]);
+            }
+
+            var statsChanges = helper.LevelUpStatsChanges;
+            if (statsChanges != null)
+            {
+                statsChanges.Clear();
+                foreach (var pair in _statsChanges)
+                    statsChanges.Add(pair.Key, pair.Value);
+            }
+
+            helper.HasLevelUpResult = _hasResult;
+        }
+
+        private void Capture(LevelUpHelper helper)
+        {
+            _inscriptions.Clear();
+            var inscriptions = helper.LevelUpInscriptions;
+            if (inscriptions != null)
+            {
+                for (int i = 0; i < inscriptions.Count; i++)
+                    _inscriptions.Add(inscriptions[i]);
+            }
+
+            _statsChanges.Clear();
+            var statsChanges = helper.LevelUpStatsChanges;
+            if (statsChanges != null)
+            {
+                foreach (var pair in statsChanges)
+                    _statsChanges[pair.Key] = pair.Value;
+            }
+
+            _hasResult = helper.HasLevelUpResult;
+        }
     }
 
     private static bool IsTargetInscription(string key)
