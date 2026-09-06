@@ -28,6 +28,8 @@ Press `T` to cycle the target filter during play:
 The filter resets to `Rare + legendary` when the game starts. Each press is recorded in `BepInEx/LogOutput.log`.
 After pressing `T`, the selected mode also appears on screen for two seconds as `희귀만`, `전설만`, or `희귀, 전설`.
 
+While the character inscription panel is open, move the mouse over an existing inscription and press `Y` to replace that inscription with another random entry from the currently selected rarity mode. The replacement is applied to the unit's actual affecter data and the panel is refreshed; it is not just a visual icon change. The selected mode is also shown in the overlay after pressing `T`.
+
 The target list follows the [inscriptions wiki](https://dungeonsettlers.wiki/ko/inscriptions): `Rare` (`희귀`) and `Legendary` (`전설`) entries. The mod checks the game's inscription keys; it does not change rarity weights or create an inscription.
 
 ## Requirements
@@ -61,13 +63,13 @@ The plugin patches the running process memory only. It does not edit the game DL
 
 ## Compatibility and safety
 
-The native cost patch verifies the expected `GameAssembly.dll` code pattern before applying. If a game update changes it, that patch refuses to apply and the game keeps its normal cost behavior. The auto-reroll patch also depends on the current `LevelUpHelper.PrayLevelUp(OfferingType, bool, bool)` method; if it is unavailable, the plugin logs the error and leaves auto-reroll disabled.
+The native cost patch scans executable code for the expected retry branch before applying, so a normal Steam rebuild that moves the branch does not break the patch. If the instruction pattern or retry target changes, it refuses to apply and the game keeps its normal cost behavior. The auto-reroll patch also depends on the current `LevelUpHelper.PrayLevelUp(OfferingType, bool, bool)` method; if it is unavailable, the plugin logs the error and leaves auto-reroll disabled.
 
 Back up saves before loading an older save in a newer game build. A save-version warning comes from the game/save version mismatch, not from this plugin.
 
 ## Source
 
-The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds a key matching the current `T`-selected rarity mode.
+The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds a key matching the current `T`-selected rarity mode. The `Y` handler reads the hovered `TraitSlotUI`, removes its old `AffecterApplyData`, adds the replacement key through the game's `DataApplier`, and refreshes the panel.
 
 ## Disclaimer
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.12-1.5.0
+
+- Fixes the retry-cost patch for the current Steam build by locating the native branch by instruction signature instead of a stale hard-coded address.
+- Keeps the first prayer cost unchanged and makes only retry prayers free.
+- Binds `T` to `Rare + legendary` -> `Rare only` -> `Legendary only`.
+- Binds `Y` to replace the inscription under the mouse with another entry from the selected rarity mode.
+- Reads the generated IL2CPP panel field as a fallback if the panel initialization hook is missed.
+
 ## 0.4.12-1.4.0
 
 - Raises the safety limit to 300 extra rolls only for `Legendary only` mode.

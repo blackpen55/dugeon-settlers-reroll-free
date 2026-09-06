@@ -1,25 +1,26 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using BepInEx.Unity.IL2CPP.Configuration;
 using HarmonyLib;
+using Il2CppInterop.Runtime;
+using Refactor;
 using Refactor.Main;
+using Refactor.Tick;
+using Refactor.UI;
 using UnityEngine;
 
 namespace DungeonSettlers.RerollFree;
 
-[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Helper", "1.4.0")]
+[BepInPlugin("com.codex.dungeonsettlers.rerollfree", "Dungeon Settlers Reroll Helper", "1.5.0")]
 [BepInProcess("DungeonSettlers.exe")]
 public sealed class Plugin : BasePlugin
 {
-    // Current Steam build: GameAssembly.dll 90,117,120 bytes.
-    // This is the start of the native `test edi,edi; je direct_roll` branch.
-    private const int BranchRva = 0xA56B9F;
-    private const int DirectRollRva = 0xA57006;
+    // The native branch moves when Steam ships a new GameAssembly.dll. Locate
+    // it by its stable instruction signature instead of editing the game file.
     private const int BranchLength = 15;
 
     // Deliberate safety ceilings: legendary is much rarer, so it gets a larger
@@ -29,9 +30,17 @@ public sealed class Plugin : BasePlugin
     private static bool _autoRerolling;
     private static Plugin _instance;
     private static RarityMode _rarityMode = RarityMode.Both;
+    private static DataApplier _dataApplier;
     private static string _overlayText;
     private static float _overlayUntil;
+    private static readonly List<TraitSlotInfo> TraitSlots = new List<TraitSlotInfo>();
+    private static readonly Dictionary<EntityStatusPanelUI, UnitEntity> PanelUnits =
+        new Dictionary<EntityStatusPanelUI, UnitEntity>();
+    private static readonly System.Random ReplacementRandom = new System.Random();
+    private static FieldInfo _panelUnitField;
+    private static int _trackedSlotLogCount;
     private readonly KeyboardShortcut _toggleRarityMode = new KeyboardShortcut(KeyCode.T);
+    private readonly KeyboardShortcut _replaceHoveredInscription = new KeyboardShortcut(KeyCode.Y);
 
     private enum RarityMode
     {
@@ -99,13 +108,6 @@ public sealed class Plugin : BasePlugin
         "AFFECTER_StormInscription"
     };
 
-    private static readonly byte[] ExpectedBytes =
-    {
-        0x85, 0xFF,                         // test edi, edi
-        0x0F, 0x84, 0x5F, 0x04, 0x00, 0x00, // je direct_roll
-        0x49, 0x8B, 0x8F, 0xF8, 0x00, 0x00, 0x00 // mov rcx,[r15+0xf8]
-    };
-
     private const uint MemCommit = 0x1000;
     private const uint MemReserve = 0x2000;
     private const uint PageExecuteReadWrite = 0x40;
@@ -118,6 +120,7 @@ public sealed class Plugin : BasePlugin
         {
             AddComponent<HotkeyListener>();
             Log.LogInfo("Rarity filter toggle is bound to T: Both -> Rare only -> Legendary only.");
+            Log.LogInfo("Inscription replacement is bound to Y while the mouse is over an inscription icon.");
         }
         catch (Exception ex)
         {
@@ -141,17 +144,38 @@ public sealed class Plugin : BasePlugin
         {
             Log.LogError($"Auto-reroll patch was not applied: {ex}");
         }
+
+        try
+        {
+            ApplyUiPatches();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Inscription replacement UI hooks were not applied: {ex}");
+        }
     }
 
     private void HandleHotkey()
     {
         if (!_toggleRarityMode.IsDown())
-            return;
+        {
+            if (_replaceHoveredInscription.IsDown())
+                ReplaceHoveredInscription();
 
-        _rarityMode = (RarityMode)(((int)_rarityMode + 1) % 3);
-        _overlayText = GetRarityModeOverlayLabel(_rarityMode);
-        _overlayUntil = Time.unscaledTime + 2f;
+            return;
+        }
+
+        _rarityMode = _rarityMode switch
+        {
+            RarityMode.Both => RarityMode.RareOnly,
+            RarityMode.RareOnly => RarityMode.LegendaryOnly,
+            _ => RarityMode.Both
+        };
+        ShowOverlay(GetRarityModeOverlayLabel(_rarityMode));
         Log.LogInfo($"Reroll target changed to {GetRarityModeLabel(_rarityMode)}.");
+
+        if (_replaceHoveredInscription.IsDown())
+            ReplaceHoveredInscription();
     }
 
     private static string GetRarityModeOverlayLabel(RarityMode mode)
@@ -177,6 +201,327 @@ public sealed class Plugin : BasePlugin
                 return "Legendary only (yellow)";
             default:
                 return "Rare + legendary (blue + yellow)";
+        }
+    }
+
+    private static void ShowOverlay(string text)
+    {
+        _overlayText = text;
+        _overlayUntil = Time.unscaledTime + 2f;
+    }
+
+    private static void ApplyUiPatches()
+    {
+        var harmony = new Harmony("com.codex.dungeonsettlers.rerollfree.inscription");
+
+        _panelUnitField = AccessTools.Field(
+            typeof(EntityStatusPanelUI),
+            "NativeFieldInfoPtr__unitEntity");
+
+        MethodBase dataApply = AccessTools.Method(typeof(DataApplier), nameof(DataApplier.Apply));
+        MethodBase setUnit = AccessTools.Method(
+            typeof(EntityStatusPanelUI),
+            nameof(EntityStatusPanelUI.SetUnitUI),
+            new[] { typeof(UnitEntity) });
+        MethodBase setTrait = AccessTools.Method(
+            typeof(TraitSlotUI),
+            nameof(TraitSlotUI.SetTrait),
+            new[] { typeof(string) });
+
+        if (dataApply == null)
+            throw new MissingMethodException("DataApplier.Apply");
+        if (setUnit == null)
+            throw new MissingMethodException("EntityStatusPanelUI.SetUnitUI(UnitEntity)");
+        if (setTrait == null)
+            throw new MissingMethodException("TraitSlotUI.SetTrait(string)");
+
+        harmony.Patch(
+            dataApply,
+            prefix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(CaptureDataApplier))));
+        harmony.Patch(
+            setUnit,
+            postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(CapturePanelUnit))));
+        harmony.Patch(
+            setTrait,
+            postfix: new HarmonyMethod(AccessTools.Method(typeof(Plugin), nameof(TrackTraitSlot))));
+
+        _instance.Log.LogInfo("Inscription replacement hooks are active.");
+    }
+
+    private static void CaptureDataApplier(DataApplier __instance)
+    {
+        if (__instance != null)
+            _dataApplier = __instance;
+    }
+
+    private static void CapturePanelUnit(EntityStatusPanelUI __instance, UnitEntity playerUnit)
+    {
+        if (__instance == null)
+            return;
+
+        if (playerUnit == null)
+            PanelUnits.Remove(__instance);
+        else
+            PanelUnits[__instance] = playerUnit;
+    }
+
+    private static void TrackTraitSlot(TraitSlotUI __instance, string key)
+    {
+        if (__instance == null || string.IsNullOrEmpty(key) ||
+            !key.EndsWith("Inscription", StringComparison.Ordinal))
+            return;
+
+        EntityStatusPanelUI panel = __instance.GetComponentInParent<EntityStatusPanelUI>();
+        for (int i = 0; i < TraitSlots.Count; i++)
+        {
+            if (!ReferenceEquals(TraitSlots[i].Slot, __instance))
+                continue;
+
+            TraitSlots[i].Key = key;
+            TraitSlots[i].Panel = panel;
+            return;
+        }
+
+        TraitSlots.Add(new TraitSlotInfo(__instance, key, panel));
+        if (_trackedSlotLogCount < 3)
+        {
+            _trackedSlotLogCount++;
+            _instance.Log.LogInfo(
+                $"Tracked inscription slot {_trackedSlotLogCount}: {key}, " +
+                $"panel={(panel == null ? "<none>" : "found")}");
+        }
+    }
+
+    private static void ReplaceHoveredInscription()
+    {
+        if (_autoRerolling)
+            return;
+
+        _instance.Log.LogInfo(
+            $"Y pressed: trackedSlots={TraitSlots.Count}, panelUnits={PanelUnits.Count}, " +
+            $"dataApplier={_dataApplier != null}.");
+
+        if (!TryGetHoveredTrait(out TraitSlotInfo slotInfo))
+        {
+            ShowOverlay("각인 위에 마우스를 올리고 Y");
+            return;
+        }
+
+        EntityStatusPanelUI panel = slotInfo.Panel;
+        if (panel == null)
+            panel = slotInfo.Slot.GetComponentInParent<EntityStatusPanelUI>();
+
+        UnitEntity unit = GetPanelUnit(panel);
+        if (unit == null)
+        {
+            ShowOverlay("현재 각인 화면에서만 사용 가능");
+            return;
+        }
+
+        if (_dataApplier == null)
+        {
+            ShowOverlay("게임 데이터가 아직 준비되지 않음");
+            _instance.Log.LogWarning("Inscription replacement skipped: DataApplier has not been observed yet.");
+            return;
+        }
+
+        IEntity entity = AsEntity(unit);
+        if (entity == null)
+        {
+            ShowOverlay("유닛 데이터 변환 실패");
+            _instance.Log.LogWarning("Inscription replacement skipped: UnitEntity could not be cast to IEntity.");
+            return;
+        }
+
+        AffecterReader affecter = EntityComponent.GetReader<AffecterReader>(entity);
+        if (affecter == null || !affecter.Has(slotInfo.Key))
+        {
+            ShowOverlay("각인 정보가 갱신됨");
+            return;
+        }
+
+        int stack = affecter.GetStack(slotInfo.Key);
+        if (stack <= 0)
+        {
+            ShowOverlay("교체할 각인을 찾지 못함");
+            return;
+        }
+
+        string replacementKey = PickReplacement(slotInfo.Key);
+        if (replacementKey == null)
+        {
+            ShowOverlay("현재 등급에서 바꿀 각인이 없음");
+            return;
+        }
+
+        float duration = affecter.GetDuration(slotInfo.Key);
+        if (!TryReplaceAffecter(unit, slotInfo.Key, replacementKey, stack, duration))
+            return;
+
+        string oldKey = slotInfo.Key;
+        slotInfo.Key = replacementKey;
+        RefreshTraitPanel(panel, unit);
+        ShowOverlay("각인 교체 완료");
+        _instance.Log.LogInfo(
+            $"Replaced inscription {oldKey} on unit {unit.Guid} with {replacementKey} " +
+            $"({GetRarityModeLabel(_rarityMode)}).");
+    }
+
+    private static bool TryGetHoveredTrait(out TraitSlotInfo result)
+    {
+        for (int i = TraitSlots.Count - 1; i >= 0; i--)
+        {
+            TraitSlotInfo candidate = TraitSlots[i];
+            if (candidate.Slot == null || !candidate.Slot.gameObject.activeInHierarchy)
+                continue;
+
+            RectTransform rect = candidate.Slot.transform as RectTransform;
+            if (rect != null &&
+                IsMouseOver(rect))
+            {
+                result = candidate;
+                return true;
+            }
+        }
+
+        result = null;
+        return false;
+    }
+
+    private static bool IsMouseOver(RectTransform rect)
+    {
+        Vector3 localPoint = rect.InverseTransformPoint(Input.mousePosition);
+        return rect.rect.Contains(new Vector2(localPoint.x, localPoint.y));
+    }
+
+    private static UnitEntity GetPanelUnit(EntityStatusPanelUI panel)
+    {
+        if (panel == null)
+            return null;
+
+        if (PanelUnits.TryGetValue(panel, out UnitEntity unit) && unit != null)
+            return unit;
+
+        // Generated IL2CPP wrappers expose the native field-info pointer rather
+        // than a managed `_unitEntity` field. Use it as a fallback when the
+        // SetUnitUI postfix was missed during panel initialization.
+        try
+        {
+            if (_panelUnitField == null)
+                return null;
+
+            IntPtr fieldInfo = (IntPtr)_panelUnitField.GetValue(null);
+            IntPtr unitPointer = IL2CPP.il2cpp_field_get_value_object(
+                fieldInfo,
+                panel.Pointer);
+            return unitPointer == IntPtr.Zero ? null : new UnitEntity(unitPointer);
+        }
+        catch (Exception ex)
+        {
+            _instance.Log.LogWarning($"Could not read panel unit fallback: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string PickReplacement(string oldKey)
+    {
+        var candidates = new List<string>();
+        foreach (string key in TargetInscriptions)
+        {
+            if (key != oldKey && IsTargetInscription(key))
+                candidates.Add(key);
+        }
+
+        return candidates.Count == 0 ? null : candidates[ReplacementRandom.Next(candidates.Count)];
+    }
+
+    private static bool TryReplaceAffecter(
+        UnitEntity unit,
+        string oldKey,
+        string replacementKey,
+        int oldStack,
+        float oldDuration)
+    {
+        bool removed = false;
+        IEntity entity = AsEntity(unit);
+        try
+        {
+            if (entity == null)
+                throw new InvalidOperationException("UnitEntity could not be cast to IEntity.");
+
+            ApplyAffecter(entity, oldKey, -oldStack, 0f);
+            removed = true;
+
+            ApplyAffecter(entity, replacementKey, oldStack, oldDuration);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _instance.Log.LogError(
+                $"Inscription replacement failed ({oldKey} -> {replacementKey}): {ex}");
+
+            if (removed)
+            {
+                try
+                {
+                    ApplyAffecter(entity, oldKey, oldStack, oldDuration);
+                }
+                catch (Exception restoreEx)
+                {
+                    _instance.Log.LogError($"Could not restore original inscription {oldKey}: {restoreEx}");
+                }
+            }
+
+            ShowOverlay("각인 교체 실패 - 원래 각인 복구 시도");
+            return false;
+        }
+    }
+
+    private static void ApplyAffecter(IEntity entity, string key, int stack, float duration)
+    {
+        IApplyData data = AsApplyData(new AffecterApplyData(entity, key, stack, duration, false, entity));
+        if (data == null)
+            throw new InvalidOperationException("AffecterApplyData could not be cast to IApplyData.");
+
+        _dataApplier.Apply(data, null);
+    }
+
+    private static void RefreshTraitPanel(EntityStatusPanelUI panel, UnitEntity unit)
+    {
+        if (panel == null || unit == null)
+            return;
+
+        try
+        {
+            panel.RefreshAffecters(EntityComponent.GetReader<AffecterReader>(AsEntity(unit)), true);
+        }
+        catch (Exception ex)
+        {
+            _instance.Log.LogWarning($"Trait panel refresh failed after replacement: {ex.Message}");
+        }
+    }
+
+    private static IEntity AsEntity(UnitEntity unit)
+    {
+        return unit == null ? null : unit.TryCast<IEntity>();
+    }
+
+    private static IApplyData AsApplyData(AffecterApplyData data)
+    {
+        return data == null ? null : data.TryCast<IApplyData>();
+    }
+
+    private sealed class TraitSlotInfo
+    {
+        public readonly TraitSlotUI Slot;
+        public string Key;
+        public EntityStatusPanelUI Panel;
+
+        public TraitSlotInfo(TraitSlotUI slot, string key, EntityStatusPanelUI panel)
+        {
+            Slot = slot;
+            Key = key;
+            Panel = panel;
         }
     }
 
@@ -322,19 +667,12 @@ public sealed class Plugin : BasePlugin
         if (gameAssembly == IntPtr.Zero)
             throw new InvalidOperationException("GameAssembly.dll is not loaded.");
 
-        IntPtr branch = IntPtr.Add(gameAssembly, BranchRva);
-        byte[] actual = new byte[ExpectedBytes.Length];
-        Marshal.Copy(branch, actual, 0, actual.Length);
-
-        if (!actual.SequenceEqual(ExpectedBytes))
-        {
-            throw new InvalidOperationException(
-                $"Game build mismatch at RVA 0x{BranchRva:X}; patch refused for safety. " +
-                $"Expected {ToHex(ExpectedBytes)}, got {ToHex(actual)}.");
-        }
+        int branchRva;
+        int directRollRva;
+        IntPtr branch = FindRerollBranch(gameAssembly, out branchRva, out directRollRva);
+        IntPtr directRoll = IntPtr.Add(gameAssembly, directRollRva);
 
         IntPtr continuation = IntPtr.Add(branch, BranchLength);
-        IntPtr directRoll = IntPtr.Add(gameAssembly, DirectRollRva);
         IntPtr codeCave = VirtualAlloc(
             IntPtr.Zero,
             (UIntPtr)0x1000,
@@ -365,7 +703,92 @@ public sealed class Plugin : BasePlugin
 
         Log.LogInfo(
             $"Reroll-free patch active in memory only. Retry cost is zero; first prayer is unchanged. " +
+            $"Branch RVA=0x{branchRva:X}, direct-roll RVA=0x{directRollRva:X}, " +
             $"GameAssembly base=0x{gameAssembly.ToInt64():X}, cave=0x{codeCave.ToInt64():X}.");
+    }
+
+    private static IntPtr FindRerollBranch(
+        IntPtr gameAssembly,
+        out int branchRva,
+        out int directRollRva)
+    {
+        IntPtr dosHeader = gameAssembly;
+        int peOffset = Marshal.ReadInt32(IntPtr.Add(dosHeader, 0x3C));
+        IntPtr ntHeaders = IntPtr.Add(gameAssembly, peOffset);
+        short sectionCount = Marshal.ReadInt16(IntPtr.Add(ntHeaders, 6));
+        short optionalHeaderSize = Marshal.ReadInt16(IntPtr.Add(ntHeaders, 20));
+        IntPtr sectionTable = IntPtr.Add(ntHeaders, 24 + optionalHeaderSize);
+        int imageSize = Marshal.ReadInt32(IntPtr.Add(ntHeaders, 24 + 56));
+        const int executable = 0x20000000;
+
+        for (int sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++)
+        {
+            IntPtr section = IntPtr.Add(sectionTable, sectionIndex * 40);
+            int virtualSize = Marshal.ReadInt32(IntPtr.Add(section, 8));
+            int sectionRva = Marshal.ReadInt32(IntPtr.Add(section, 12));
+            int rawSize = Marshal.ReadInt32(IntPtr.Add(section, 16));
+            int characteristics = Marshal.ReadInt32(IntPtr.Add(section, 36));
+
+            if ((characteristics & executable) == 0)
+                continue;
+
+            if (sectionRva < 0 || sectionRva >= imageSize)
+                continue;
+
+            int sectionSize = Math.Min(
+                Math.Max(virtualSize, rawSize),
+                imageSize - sectionRva);
+            if (sectionSize < BranchLength)
+                continue;
+
+            byte[] code = new byte[sectionSize];
+            Marshal.Copy(IntPtr.Add(gameAssembly, sectionRva), code, 0, code.Length);
+
+            for (int offset = 0; offset <= code.Length - BranchLength; offset++)
+            {
+                if (!MatchesRerollSignature(code, offset))
+                    continue;
+
+                int relativeTarget = BitConverter.ToInt32(code, offset + 4);
+                long target = (long)sectionRva + offset + 8 + relativeTarget;
+                if (target < 0 || target > imageSize - 3)
+                    continue;
+                int candidateDirectRollRva = (int)target;
+
+                byte[] directRollPrefix = new byte[3];
+                Marshal.Copy(
+                    IntPtr.Add(gameAssembly, candidateDirectRollRva),
+                    directRollPrefix,
+                    0,
+                    directRollPrefix.Length);
+                if (directRollPrefix[0] != 0x45 ||
+                    directRollPrefix[1] != 0x33 ||
+                    directRollPrefix[2] != 0xC0)
+                    continue;
+
+                branchRva = sectionRva + offset;
+                directRollRva = candidateDirectRollRva;
+                return IntPtr.Add(gameAssembly, branchRva);
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Could not locate the retry-cost branch in GameAssembly.dll; patch refused for safety.");
+    }
+
+    private static bool MatchesRerollSignature(byte[] code, int offset)
+    {
+        return code[offset] == 0x85 &&
+               code[offset + 1] == 0xFF &&
+               code[offset + 2] == 0x0F &&
+               code[offset + 3] == 0x84 &&
+               code[offset + 8] == 0x49 &&
+               code[offset + 9] == 0x8B &&
+               code[offset + 10] == 0x8F &&
+               code[offset + 11] == 0xF8 &&
+               code[offset + 12] == 0x00 &&
+               code[offset + 13] == 0x00 &&
+               code[offset + 14] == 0x00;
     }
 
     private static byte[] BuildStub(IntPtr continuation, IntPtr directRoll)
@@ -399,11 +822,6 @@ public sealed class Plugin : BasePlugin
         jump[10] = 0xFF;
         jump[11] = 0xE0; // jmp rax
         return jump;
-    }
-
-    private static string ToHex(byte[] bytes)
-    {
-        return BitConverter.ToString(bytes).Replace("-", " ");
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
