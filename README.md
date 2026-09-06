@@ -19,18 +19,18 @@ The release ZIP contains only this mod and its instructions. It does **not** con
 
 When a retry result has no matching inscription, the mod immediately performs another retry. It stops as soon as one appears, or at a safety limit of 50 extra rolls (300 in `Legendary only` mode). The first prayer is never auto-rerolled, and the game's inscription/stat lock flags are preserved.
 
-Press `T` to cycle the target filter during play:
+Press `J` to cycle the target filter during play:
 
-- `Rare + legendary` (blue + yellow) - default
-- `Rare only` (blue)
-- `Legendary only` (yellow)
+- `Rare + Legendary` (blue + yellow) - default
+- `Rare Only` (blue)
+- `Legendary Only` (yellow)
 
-The filter resets to `Rare + legendary` when the game starts. Each press is recorded in `BepInEx/LogOutput.log`.
-After pressing `T`, the selected mode also appears on screen for two seconds as `희귀만`, `전설만`, or `희귀, 전설`.
+The filter resets to `Rare + Legendary` when the game starts. Each press is recorded in `BepInEx/LogOutput.log`.
+After pressing `J`, the selected mode appears in the left-side overlay for two seconds. `Rare` is blue and `Legendary` is yellow.
 
-While the character inscription panel is open, move the mouse over an existing inscription and press `Y` to replace that inscription with another random entry from the currently selected rarity mode. The replacement is applied to the unit's actual affecter data and the panel is refreshed; it is not just a visual icon change. The selected mode is also shown in the overlay after pressing `T`.
+While the character inscription panel is open, move the mouse over an existing inscription and press `L` to replace that inscription with another random entry from the currently selected rarity mode. The replacement is applied to the unit's actual affecter data and the panel is refreshed; it is not just a visual icon change.
 
-The target list follows the [inscriptions wiki](https://dungeonsettlers.wiki/ko/inscriptions): `Rare` (`희귀`) and `Legendary` (`전설`) entries. The mod checks the game's inscription keys; it does not change rarity weights or create an inscription.
+The target list follows the [inscriptions wiki](https://dungeonsettlers.wiki/ko/inscriptions): `Rare` (blue) and `Legendary` (yellow) entries. The mod checks the game's inscription keys; it does not change rarity weights or create an inscription.
 
 ## Requirements
 
@@ -51,7 +51,7 @@ The tested loader is `BepInEx 6.0.0-be.788 Unity.IL2CPP-win-x64`. Builds are ava
 
    `Auto-reroll active for rare/legendary inscriptions`
 
-   `Rarity filter toggle is bound to T`
+   `Rarity filter toggle is bound to J`
 
 ## Disable / uninstall
 
@@ -69,7 +69,7 @@ Back up saves before loading an older save in a newer game build. A save-version
 
 ## Source
 
-The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds a key matching the current `T`-selected rarity mode. The `Y` handler reads the hovered `TraitSlotUI`, removes its old `AffecterApplyData`, adds the replacement key through the game's `DataApplier`, and refreshes the panel.
+The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds a key matching the current `J`-selected rarity mode. The `L` handler reads the hovered `TraitSlotUI`, removes its old `AffecterApplyData`, adds the replacement key through the game's `DataApplier`, and refreshes the panel.
 
 ## Disclaimer
 

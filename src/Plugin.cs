@@ -22,6 +22,7 @@ public sealed class Plugin : BasePlugin
     // The native branch moves when Steam ships a new GameAssembly.dll. Locate
     // it by its stable instruction signature instead of editing the game file.
     private const int BranchLength = 15;
+    private const int PanelUnitFieldOffset = 0x48;
 
     // Deliberate safety ceilings: legendary is much rarer, so it gets a larger
     // cap only in LegendaryOnly mode. Neither path can loop indefinitely.
@@ -39,8 +40,10 @@ public sealed class Plugin : BasePlugin
     private static readonly System.Random ReplacementRandom = new System.Random();
     private static FieldInfo _panelUnitField;
     private static int _trackedSlotLogCount;
-    private readonly KeyboardShortcut _toggleRarityMode = new KeyboardShortcut(KeyCode.T);
-    private readonly KeyboardShortcut _replaceHoveredInscription = new KeyboardShortcut(KeyCode.Y);
+    // J and L are unused in the game's current keybind screen. T and Y are
+    // already assigned to the game's skill/item shortcuts.
+    private readonly KeyboardShortcut _toggleRarityMode = new KeyboardShortcut(KeyCode.J);
+    private readonly KeyboardShortcut _replaceHoveredInscription = new KeyboardShortcut(KeyCode.L);
 
     private enum RarityMode
     {
@@ -119,8 +122,8 @@ public sealed class Plugin : BasePlugin
         try
         {
             AddComponent<HotkeyListener>();
-            Log.LogInfo("Rarity filter toggle is bound to T: Both -> Rare only -> Legendary only.");
-            Log.LogInfo("Inscription replacement is bound to Y while the mouse is over an inscription icon.");
+            Log.LogInfo("Rarity filter toggle is bound to J: Rare + Legendary -> Rare Only -> Legendary Only.");
+            Log.LogInfo("Inscription replacement is bound to L while the mouse is over an inscription icon.");
         }
         catch (Exception ex)
         {
@@ -183,11 +186,11 @@ public sealed class Plugin : BasePlugin
         switch (mode)
         {
             case RarityMode.RareOnly:
-                return "희귀만";
+                return "<color=#42A5F5>Rare Only</color>";
             case RarityMode.LegendaryOnly:
-                return "전설만";
+                return "<color=#FFD54F>Legendary Only</color>";
             default:
-                return "희귀, 전설";
+                return "<color=#42A5F5>Rare</color> + <color=#FFD54F>Legendary</color>";
         }
     }
 
@@ -196,11 +199,11 @@ public sealed class Plugin : BasePlugin
         switch (mode)
         {
             case RarityMode.RareOnly:
-                return "Rare only (blue)";
+                return "Rare Only (blue)";
             case RarityMode.LegendaryOnly:
-                return "Legendary only (yellow)";
+                return "Legendary Only (yellow)";
             default:
-                return "Rare + legendary (blue + yellow)";
+                return "Rare + Legendary (blue + yellow)";
         }
     }
 
@@ -298,12 +301,13 @@ public sealed class Plugin : BasePlugin
             return;
 
         _instance.Log.LogInfo(
-            $"Y pressed: trackedSlots={TraitSlots.Count}, panelUnits={PanelUnits.Count}, " +
+            $"L pressed: trackedSlots={TraitSlots.Count}, panelUnits={PanelUnits.Count}, " +
             $"dataApplier={_dataApplier != null}.");
 
         if (!TryGetHoveredTrait(out TraitSlotInfo slotInfo))
         {
-            ShowOverlay("각인 위에 마우스를 올리고 Y");
+            _instance.Log.LogInfo("L skipped: no tracked inscription is under the mouse.");
+            ShowOverlay("Move the mouse over an inscription and press L");
             return;
         }
 
@@ -314,13 +318,14 @@ public sealed class Plugin : BasePlugin
         UnitEntity unit = GetPanelUnit(panel);
         if (unit == null)
         {
-            ShowOverlay("현재 각인 화면에서만 사용 가능");
+            _instance.Log.LogWarning("L skipped: the hovered panel has no selected unit.");
+            ShowOverlay("Open a character inscription panel first");
             return;
         }
 
         if (_dataApplier == null)
         {
-            ShowOverlay("게임 데이터가 아직 준비되지 않음");
+            ShowOverlay("Game data is not ready yet");
             _instance.Log.LogWarning("Inscription replacement skipped: DataApplier has not been observed yet.");
             return;
         }
@@ -328,7 +333,7 @@ public sealed class Plugin : BasePlugin
         IEntity entity = AsEntity(unit);
         if (entity == null)
         {
-            ShowOverlay("유닛 데이터 변환 실패");
+            ShowOverlay("Could not read the selected unit");
             _instance.Log.LogWarning("Inscription replacement skipped: UnitEntity could not be cast to IEntity.");
             return;
         }
@@ -336,21 +341,21 @@ public sealed class Plugin : BasePlugin
         AffecterReader affecter = EntityComponent.GetReader<AffecterReader>(entity);
         if (affecter == null || !affecter.Has(slotInfo.Key))
         {
-            ShowOverlay("각인 정보가 갱신됨");
+            ShowOverlay("Inscription data was refreshed");
             return;
         }
 
         int stack = affecter.GetStack(slotInfo.Key);
         if (stack <= 0)
         {
-            ShowOverlay("교체할 각인을 찾지 못함");
+            ShowOverlay("Could not find the hovered inscription");
             return;
         }
 
         string replacementKey = PickReplacement(slotInfo.Key);
         if (replacementKey == null)
         {
-            ShowOverlay("현재 등급에서 바꿀 각인이 없음");
+            ShowOverlay("No replacement is available for this rarity mode");
             return;
         }
 
@@ -361,7 +366,7 @@ public sealed class Plugin : BasePlugin
         string oldKey = slotInfo.Key;
         slotInfo.Key = replacementKey;
         RefreshTraitPanel(panel, unit);
-        ShowOverlay("각인 교체 완료");
+        ShowOverlay("Inscription replaced");
         _instance.Log.LogInfo(
             $"Replaced inscription {oldKey} on unit {unit.Guid} with {replacementKey} " +
             $"({GetRarityModeLabel(_rarityMode)}).");
@@ -390,8 +395,15 @@ public sealed class Plugin : BasePlugin
 
     private static bool IsMouseOver(RectTransform rect)
     {
-        Vector3 localPoint = rect.InverseTransformPoint(Input.mousePosition);
-        return rect.rect.Contains(new Vector2(localPoint.x, localPoint.y));
+        Canvas canvas = rect.GetComponentInParent<Canvas>();
+        Camera eventCamera = canvas != null &&
+                             canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera
+            : null;
+        return RectTransformUtility.RectangleContainsScreenPoint(
+            rect,
+            Input.mousePosition,
+            eventCamera);
     }
 
     private static UnitEntity GetPanelUnit(EntityStatusPanelUI panel)
@@ -407,14 +419,29 @@ public sealed class Plugin : BasePlugin
         // SetUnitUI postfix was missed during panel initialization.
         try
         {
-            if (_panelUnitField == null)
-                return null;
+            if (_panelUnitField != null)
+            {
+                IntPtr fieldInfo = (IntPtr)_panelUnitField.GetValue(null);
+                if (fieldInfo != IntPtr.Zero)
+                {
+                    IntPtr unitPointer = IL2CPP.il2cpp_field_get_value_object(
+                        fieldInfo,
+                        panel.Pointer);
+                    if (unitPointer != IntPtr.Zero)
+                        return new UnitEntity(unitPointer);
+                }
+            }
 
-            IntPtr fieldInfo = (IntPtr)_panelUnitField.GetValue(null);
-            IntPtr unitPointer = IL2CPP.il2cpp_field_get_value_object(
-                fieldInfo,
-                panel.Pointer);
-            return unitPointer == IntPtr.Zero ? null : new UnitEntity(unitPointer);
+            // EntityStatusPanelUI._unitEntity is at this offset in the current
+            // IL2CPP layout. This covers panels initialized before our postfix
+            // was installed and wrappers whose generated field-info lookup is
+            // unavailable.
+            IntPtr nativeUnitPointer = Marshal.ReadIntPtr(
+                panel.Pointer,
+                PanelUnitFieldOffset);
+            return nativeUnitPointer == IntPtr.Zero
+                ? null
+                : new UnitEntity(nativeUnitPointer);
         }
         catch (Exception ex)
         {
@@ -472,7 +499,7 @@ public sealed class Plugin : BasePlugin
                 }
             }
 
-            ShowOverlay("각인 교체 실패 - 원래 각인 복구 시도");
+            ShowOverlay("Replacement failed; restoring the original inscription");
             return false;
         }
     }
@@ -628,7 +655,7 @@ public sealed class Plugin : BasePlugin
 
     private sealed class HotkeyListener : MonoBehaviour
     {
-        private GUIStyle _overlayStyle;
+        private GUIStyle _overlayTextStyle;
 
         public HotkeyListener(IntPtr ptr) : base(ptr) { }
 
@@ -643,20 +670,25 @@ public sealed class Plugin : BasePlugin
             if (_instance == null || string.IsNullOrEmpty(_overlayText) || Time.unscaledTime > _overlayUntil)
                 return;
 
-            if (_overlayStyle == null)
+            if (_overlayTextStyle == null)
             {
-                _overlayStyle = new GUIStyle(GUI.skin.box)
+                _overlayTextStyle = new GUIStyle(GUI.skin.label)
                 {
-                    fontSize = 22
+                    fontSize = 22,
+                    alignment = TextAnchor.MiddleCenter,
+                    richText = true,
+                    fontStyle = FontStyle.Bold
                 };
             }
 
-            Rect rect = new Rect(20f, 20f, 280f, 54f);
+            float width = Mathf.Min(460f, Screen.width - 40f);
+            float y = Mathf.Clamp(Screen.height * 0.30f, 180f, 360f);
+            Rect rect = new Rect(20f, y, width, 62f);
             Color previousColor = GUI.color;
             GUI.color = new Color(0f, 0f, 0f, 0.8f);
             GUI.Box(rect, GUIContent.none);
             GUI.color = Color.white;
-            GUI.Label(rect, _overlayText, _overlayStyle);
+            GUI.Label(rect, _overlayText, _overlayTextStyle);
             GUI.color = previousColor;
         }
     }

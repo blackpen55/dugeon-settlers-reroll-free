@@ -4,9 +4,10 @@
 
 - Fixes the retry-cost patch for the current Steam build by locating the native branch by instruction signature instead of a stale hard-coded address.
 - Keeps the first prayer cost unchanged and makes only retry prayers free.
-- Binds `T` to `Rare + legendary` -> `Rare only` -> `Legendary only`.
-- Binds `Y` to replace the inscription under the mouse with another entry from the selected rarity mode.
-- Reads the generated IL2CPP panel field as a fallback if the panel initialization hook is missed.
+- Binds `J` to `Rare + Legendary` -> `Rare Only` -> `Legendary Only`.
+- Binds `L` to replace the inscription under the mouse with another entry from the selected rarity mode.
+- Shows an English, color-coded overlay in the left-side open area: blue for Rare and yellow for Legendary.
+- Uses screen-space UI hit testing and a native panel-field fallback so `L` works on the current status panel.
 
 ## 0.4.12-1.4.0
 
