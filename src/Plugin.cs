@@ -39,8 +39,8 @@ public sealed class Plugin : BasePlugin
     private static readonly Dictionary<EntityStatusPanelUI, UnitEntity> PanelUnits =
         new Dictionary<EntityStatusPanelUI, UnitEntity>();
     private static readonly System.Random ReplacementRandom = new System.Random();
-    private readonly KeyboardShortcut _toggleRarityMode = new KeyboardShortcut(KeyCode.T);
-    private readonly KeyboardShortcut _replaceHoveredInscription = new KeyboardShortcut(KeyCode.Y);
+    private readonly KeyboardShortcut _toggleRarityMode = new KeyboardShortcut(KeyCode.Y);
+    private readonly KeyboardShortcut _replaceHoveredInscription = new KeyboardShortcut(KeyCode.U);
 
     private enum RarityMode
     {
@@ -126,8 +126,8 @@ public sealed class Plugin : BasePlugin
         try
         {
             AddComponent<HotkeyListener>();
-            Log.LogInfo("Rarity filter toggle is bound to T: Both -> Rare only -> Legendary only.");
-            Log.LogInfo("Inscription replacement is bound to Y while the mouse is over an inscription icon.");
+            Log.LogInfo("Rarity filter toggle is bound to Y: Both -> Rare only -> Legendary only.");
+            Log.LogInfo("Inscription replacement is bound to U while the mouse is over an inscription icon.");
         }
         catch (Exception ex)
         {
@@ -295,7 +295,7 @@ public sealed class Plugin : BasePlugin
 
         if (!TryGetHoveredTrait(out TraitSlotInfo slotInfo))
         {
-            ShowOverlay("각인 위에 마우스를 올리고 Y");
+            ShowOverlay("각인 위에 마우스를 올리고 U");
             return;
         }
 

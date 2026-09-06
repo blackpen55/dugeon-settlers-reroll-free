@@ -2,10 +2,10 @@
 
 ## 0.4.12-1.5.0
 
-- Adds `Y` replacement for an inscription under the mouse cursor in the unit status panel.
+- Adds `U` replacement for an inscription under the mouse cursor in the unit status panel.
 - Replaces only the selected inscription with a random entry from the active rarity group.
 - Uses the game's affecter application path and refreshes the visible trait panel.
-- Keeps `T` for the rarity-filter toggle and uses `Y` for inscription replacement.
+- Changes the rarity-filter hotkey from `T` to `Y`.
 - Cycles `Rare only` → `Legendary only` → `Rare + legendary`.
 
 ## 0.4.12-1.4.0
