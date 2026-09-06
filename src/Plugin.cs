@@ -9,6 +9,7 @@ using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Refactor;
 using Refactor.Main;
+using Refactor.Setting;
 using Refactor.Tick;
 using Refactor.UI;
 using UnityEngine;
@@ -187,11 +188,17 @@ public sealed class Plugin : BasePlugin
         switch (mode)
         {
             case RarityMode.RareOnly:
-                return "<color=#42A5F5>Rare Only</color>";
+                return IsKoreanLanguage()
+                    ? "<color=#42A5F5>희귀만</color>"
+                    : "<color=#42A5F5>Rare Only</color>";
             case RarityMode.LegendaryOnly:
-                return "<color=#FFD54F>Legendary Only</color>";
+                return IsKoreanLanguage()
+                    ? "<color=#FFD54F>전설만</color>"
+                    : "<color=#FFD54F>Legendary Only</color>";
             default:
-                return "<color=#42A5F5>Rare</color> + <color=#FFD54F>Legendary</color>";
+                return IsKoreanLanguage()
+                    ? "<color=#42A5F5>희귀</color> + <color=#FFD54F>전설</color>"
+                    : "<color=#42A5F5>Rare</color> + <color=#FFD54F>Legendary</color>";
         }
     }
 
@@ -200,11 +207,13 @@ public sealed class Plugin : BasePlugin
         switch (mode)
         {
             case RarityMode.RareOnly:
-                return "Rare Only (blue)";
+                return IsKoreanLanguage() ? "희귀만 (파란색)" : "Rare Only (blue)";
             case RarityMode.LegendaryOnly:
-                return "Legendary Only (yellow)";
+                return IsKoreanLanguage() ? "전설만 (노란색)" : "Legendary Only (yellow)";
             default:
-                return "Rare + Legendary (blue + yellow)";
+                return IsKoreanLanguage()
+                    ? "희귀 + 전설 (파란색 + 노란색)"
+                    : "Rare + Legendary (blue + yellow)";
         }
     }
 
@@ -212,6 +221,24 @@ public sealed class Plugin : BasePlugin
     {
         _overlayText = text;
         _overlayUntil = Time.unscaledTime + 2f;
+    }
+
+    private static void ShowOverlay(string koreanText, string englishText)
+    {
+        _overlayText = IsKoreanLanguage() ? koreanText : englishText;
+        _overlayUntil = Time.unscaledTime + 2f;
+    }
+
+    private static bool IsKoreanLanguage()
+    {
+        try
+        {
+            return LanguageSetting.GetCurrentLanguage() == LanguageType.Korean;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void ApplyUiPatches()
@@ -308,7 +335,7 @@ public sealed class Plugin : BasePlugin
         if (!TryGetHoveredTrait(out TraitSlotInfo slotInfo))
         {
             _instance.Log.LogInfo("L skipped: no tracked inscription is under the mouse.");
-            ShowOverlay("Move the mouse over an inscription and press L");
+            ShowOverlay("각인 위에 마우스를 올리고 L을 누르세요", "Move the mouse over an inscription and press L");
             return;
         }
 
@@ -320,13 +347,13 @@ public sealed class Plugin : BasePlugin
         if (unit == null)
         {
             _instance.Log.LogWarning("L skipped: the hovered panel has no selected unit.");
-            ShowOverlay("Open a character inscription panel first");
+            ShowOverlay("캐릭터 각인 패널을 먼저 여세요", "Open a character inscription panel first");
             return;
         }
 
         if (_dataApplier == null)
         {
-            ShowOverlay("Game data is not ready yet");
+            ShowOverlay("게임 데이터가 아직 준비되지 않았습니다", "Game data is not ready yet");
             _instance.Log.LogWarning("Inscription replacement skipped: DataApplier has not been observed yet.");
             return;
         }
@@ -334,7 +361,7 @@ public sealed class Plugin : BasePlugin
         IEntity entity = AsEntity(unit);
         if (entity == null)
         {
-            ShowOverlay("Could not read the selected unit");
+            ShowOverlay("선택한 유닛을 읽을 수 없습니다", "Could not read the selected unit");
             _instance.Log.LogWarning("Inscription replacement skipped: UnitEntity could not be cast to IEntity.");
             return;
         }
@@ -342,21 +369,21 @@ public sealed class Plugin : BasePlugin
         AffecterReader affecter = EntityComponent.GetReader<AffecterReader>(entity);
         if (affecter == null || !affecter.Has(slotInfo.Key))
         {
-            ShowOverlay("Inscription data was refreshed");
+            ShowOverlay("각인 데이터가 갱신되었습니다", "Inscription data was refreshed");
             return;
         }
 
         int stack = affecter.GetStack(slotInfo.Key);
         if (stack <= 0)
         {
-            ShowOverlay("Could not find the hovered inscription");
+            ShowOverlay("마우스를 올린 각인을 찾을 수 없습니다", "Could not find the hovered inscription");
             return;
         }
 
         string replacementKey = PickReplacement(slotInfo.Key, affecter);
         if (replacementKey == null)
         {
-            ShowOverlay("No replacement is available for this rarity mode");
+            ShowOverlay("현재 희귀도 모드에서 바꿀 각인이 없습니다", "No replacement is available for this rarity mode");
             return;
         }
 
@@ -367,7 +394,7 @@ public sealed class Plugin : BasePlugin
         string oldKey = slotInfo.Key;
         slotInfo.Key = replacementKey;
         RefreshTraitPanel(panel, unit);
-        ShowOverlay("Inscription replaced");
+        ShowOverlay("각인을 변경했습니다", "Inscription replaced");
         _instance.Log.LogInfo(
             $"Replaced inscription {oldKey} on unit {unit.Guid} with {replacementKey} " +
             $"({GetRarityModeLabel(_rarityMode)}).");
@@ -570,7 +597,9 @@ public sealed class Plugin : BasePlugin
                 _instance.Log.LogError($"Could not restore original inscription {oldKey}: {restoreEx}");
             }
 
-            ShowOverlay("Replacement failed; restoring the original inscription");
+            ShowOverlay(
+                "교체에 실패하여 원래 각인을 복원했습니다",
+                "Replacement failed; restoring the original inscription");
             return false;
         }
     }
