@@ -6,8 +6,10 @@
 - Keeps the first prayer cost unchanged and makes only retry prayers free.
 - Binds `J` to `Rare + Legendary` -> `Rare Only` -> `Legendary Only`.
 - Binds `L` to replace the inscription under the mouse with another entry from the selected rarity mode.
-- Shows an English, color-coded overlay in the left-side open area: blue for Rare and yellow for Legendary.
+- Shows a language-aware, color-coded overlay in the left-side open area: Korean when the game is set to Korean, English otherwise; blue for Rare and yellow for Legendary.
 - Uses screen-space UI hit testing and a native panel-field fallback so `L` works on the current status panel.
+- Makes inscription replacement transactional so a rejected replacement cannot delete the original inscription.
+- Restores the last valid prayer result if the auto-reroll safety limit is reached without a matching rarity.
 
 ## 0.4.12-1.4.0
 

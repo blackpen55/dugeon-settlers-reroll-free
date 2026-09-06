@@ -26,7 +26,7 @@ Press `J` to cycle the target filter during play:
 - `Legendary Only` (yellow)
 
 The filter resets to `Rare + Legendary` when the game starts. Each press is recorded in `BepInEx/LogOutput.log`.
-After pressing `J`, the selected mode appears in the left-side overlay for two seconds. `Rare` is blue and `Legendary` is yellow.
+After pressing `J`, the selected mode appears in the left-side overlay for two seconds. `Rare` is blue and `Legendary` is yellow. The overlay follows the game's language setting: Korean displays Korean text, and every other language displays English.
 
 While the character inscription panel is open, move the mouse over an existing inscription and press `L` to replace that inscription with another random entry from the currently selected rarity mode. The replacement is applied to the unit's actual affecter data and the panel is refreshed; it is not just a visual icon change.
 
@@ -69,7 +69,7 @@ Back up saves before loading an older save in a newer game build. A save-version
 
 ## Source
 
-The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds a key matching the current `J`-selected rarity mode. The `L` handler reads the hovered `TraitSlotUI`, removes its old `AffecterApplyData`, adds the replacement key through the game's `DataApplier`, and refreshes the panel.
+The plugin source is in [`src/Plugin.cs`](src/Plugin.cs). The native runtime patch checks `LevelUpHelper.HasLevelUpResult`: false keeps the original first-prayer path; true sets only the calculated retry amount to zero and follows the game's existing zero-cost branch. The Harmony postfix checks `LevelUpHelper.LevelUpInscriptions` after a retry and calls the same three-argument prayer method again until it finds a key matching the current `J`-selected rarity mode. The `L` handler reads the hovered `TraitSlotUI`, swaps the affecter transactionally so a failed replacement cannot delete the original, and refreshes the panel. Overlay text is selected from the game's current `LanguageSetting`.
 
 ## Disclaimer
 
